@@ -16,6 +16,9 @@ from os.path import expanduser
 from lxml import html
 
 HOME= expanduser("~")
+DATA_DIR = os.path.join(os.getcwd(),'data')
+if not os.path.isdir(DATA_DIR):
+    os.mkdir()
 
 vocab_dir = "/Volumes/Kindle/system/vocabulary/vocab.db"
 clip_dir = "/Volumes/Kindle/documents/My Clippings.txt"
@@ -84,31 +87,31 @@ def main():
     print()
     book = bn[int(input("Which book do you want to query? (Insert book index) "))][0]
     print(book)
-    note = fetch_note(book).head(1)
-    words = fetch_words(book).head(1)
+    note = fetch_note(book)
+    words = fetch_words(book)
     print()
     print("=========")
 
     print()
-    if_trans = input("Words list is fetched. Do you want to translate all the words? [y/n]")
+    if_trans = input("Words list is fetched. Do you want to translate all the words? [y/n] ")
     if if_trans=='y':
         words['trans'] = words['stem'].apply(eng_to_cn)
         print("Translation is completed.")
-    word_dir = os.path.join(HOME,book+' Word.csv')
+    word_dir = os.path.join(DATA_DIR ,book+' Word.csv')
     words.to_csv(word_dir,index=False)
     print("Words directory: "+word_dir)
     print()
     print("=========")
 
     print()
-    if_trans_note = input("Notes are fetched. Do you want to translate them all? [y/n]")
+    if_trans_note = input("Notes are fetched. Do you want to translate them all? [y/n] ")
     if if_trans_note=='y':
         note['len_'] = note['note'].str.strip(string.punctuation).str.split().apply(len)
         note.loc[note['len_']==1,'trans'] = note.loc[note['len_']==1,'note'].apply(lambda x: eng_to_cn(x,'youdao'))
         note.loc[note['len_']>1,'trans']  = note.loc[note['len_']>1,'note'].apply(lambda x: eng_to_cn(x,'google'))
         del note['len_']
         print("Translation is completed.")
-    note_dir = os.path.join(HOME,book+' Note.csv')
+    note_dir = os.path.join(DATA_DIR ,book+' Note.csv')
     note.to_csv(note_dir,index=False)
     print("Notes directory: "+note_dir)
     print()
