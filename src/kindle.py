@@ -1,9 +1,9 @@
 import os
 import re
-import sys
+import sys,csv
 import time
-import urllib
 import string
+import logging
 import argparse
 import platform
 import requests
@@ -11,14 +11,18 @@ import sqlite3
 import subprocess
 import pandas as pd
 import numpy as np
+from time import sleep
 from googletrans import Translator
 from os.path import expanduser
 from lxml import html
 
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG,format='%(asctime)s - %(levelname)s - %(message)s')
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
 HOME= expanduser("~")
 DATA_DIR = os.path.join(os.getcwd(),'data')
-if not os.path.isdir(DATA_DIR):
-    os.mkdir()
+if not os.path.isdir(DATA_DIR): os.mkdir(DATA_DIR)
 
 vocab_dir = "/Volumes/Kindle/system/vocabulary/vocab.db"
 clip_dir = "/Volumes/Kindle/documents/My Clippings.txt"
@@ -37,29 +41,63 @@ def fetch_words(book):
     words = pd.DataFrame(data,columns = ['word','stem','usage'])
     return words
 
-def eng_to_cn(word,src = 'youdao'):
-    if src =='youdao':
-        url = "https://www.youdao.com/w/{}/#keyfrom=dict2.top".format(urllib.parse.quote(word))
-        page = requests.get(url)
+def eng_to_cn(row,word_file,total_len):
+    if 'stem' in row.index:
+        word = row['stem']
+    elif 'note' in row.index:
+        word = row['note']
+    
+    if len(word.split())<3:
+        
+        url = "https://www.youdao.com/w/{}/#keyfrom=dict2.top".format(word)
+        
+        try:
+            page = requests.get(url)
+        except requests.exceptions.ConnectionError:
+            logging.debug("Connection refused")
+            sleep(5)
+
         tree = html.fromstring(page.content)
         xpath = '//*[@id="phrsListTab"]//div[@class="trans-container"]/ul/li/text()'
         output = tree.xpath(xpath)
         if output!=[]:
-            return ',\n'.join(output)
+            output = ',\n'.join(output)
         else:
             xpath = '//div[@id="tWebTrans"]/div[not(@id)]//div[@class="title"]//span/text()'
             output = tree.xpath(xpath)
         if output!=[]:
-            return ',\n'.join(output)
+            output = ''.join(output)
         else:
-            return ''
+            output = ''
         
-    elif src =='google':
+    else:
+        
         translator = Translator()
         output = translator.translate(word, dest='zh-cn').text
-        return output
+        
+    row = row.to_dict()
+    row['trans']=output
+    write_row(row,word_file)
+    
+    remain = total_len-row['index']
+    if remain%20==0:
+        logging.info(str(remain)+' remaining')
+    return output
+    
 
-
+def write_row(row,word_file):
+    csv_col = row.keys()
+    with open(word_file,'a') as file:
+        writer = csv.DictWriter(file,fieldnames = list(csv_col))            
+        writer.writerow(row)
+            
+            
+def write_header(csv_col,word_file):
+    with open(word_file,'w') as file:
+        writer = csv.DictWriter(file,fieldnames = list(csv_col))            
+        writer.writeheader()
+        
+        
 def fetch_note(book):
     text = []
     with open(clip_dir,'r') as f:
@@ -76,6 +114,7 @@ def fetch_note(book):
     note['title']=book
     return note
 
+
 def main():
     bn = fetch_bookname()
     bn_op = ["{}. {}".format(i,b[0]) for i, b in enumerate(bn)]
@@ -88,35 +127,35 @@ def main():
     book = bn[int(input("Which book do you want to query? (Insert book index) "))][0]
     print(book)
     note = fetch_note(book)
-    words = fetch_words(book)
+    words = fetch_words(book).reset_index()
     print()
     print("=========")
 
     print()
     if_trans = input("Words list is fetched. Do you want to translate all the words? [y/n] ")
+    word_file = os.path.join(DATA_DIR ,book+' Word.csv')
     if if_trans=='y':
-        words['trans'] = words['stem'].apply(eng_to_cn)
+        
+        write_header(list(words.columns)+['trans'],word_file)
+        words.apply(lambda x:eng_to_cn(x,word_file,len(words)),axis=1)
         print("Translation is completed.")
-    word_dir = os.path.join(DATA_DIR ,book+' Word.csv')
-    words.to_csv(word_dir,index=False)
-    print("Words directory: "+word_dir)
+    words.to_csv(word_file,index=False)
+    print("Words directory: "+word_file)
     print()
     print("=========")
 
     print()
     if_trans_note = input("Notes are fetched. Do you want to translate them all? [y/n] ")
+    note_file = os.path.join(DATA_DIR ,book+' Note.csv')
     if if_trans_note=='y':
-        note['len_'] = note['note'].str.strip(string.punctuation).str.split().apply(len)
-        note.loc[note['len_']==1,'trans'] = note.loc[note['len_']==1,'note'].apply(lambda x: eng_to_cn(x,'youdao'))
-        note.loc[note['len_']>1,'trans']  = note.loc[note['len_']>1,'note'].apply(lambda x: eng_to_cn(x,'google'))
-        del note['len_']
+        
+        write_header(list(note.columns)+['trans'],note_file)
+        note.apply(lambda x: eng_to_cn(x,note_file,len(note)),axis=1)
         print("Translation is completed.")
-    note_dir = os.path.join(DATA_DIR ,book+' Note.csv')
-    note.to_csv(note_dir,index=False)
-    print("Notes directory: "+note_dir)
+    note.to_csv(note_file,index=False)
+    print("Notes directory: "+note_file)
     print()
     print("=========")
-    
     
     
 if __name__=="__main__":
